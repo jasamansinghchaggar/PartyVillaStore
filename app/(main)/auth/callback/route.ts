@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 export async function GET(request: NextRequest) {
@@ -8,16 +8,29 @@ export async function GET(request: NextRequest) {
 
   if (code) {
     try {
-      // Create route handler client for server-side auth
-      const supabase = createRouteHandlerClient({ cookies })
-      
+      const cookieStore = await cookies()
+      const supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+        {
+          cookies: {
+            getAll() {
+              return cookieStore.getAll()
+            },
+            setAll(cookiesToSet) {
+              cookiesToSet.forEach(({ name, value, options }) => {
+                cookieStore.set(name, value, options)
+              })
+            },
+          },
+        }
+      )
+
       await supabase.auth.exchangeCodeForSession(code)
     } catch (error) {
-      // Return to login page with error
       return NextResponse.redirect(new URL('/auth/login?error=auth_callback_error', request.url))
     }
   }
 
-  // URL to redirect to after sign in process completes
   return NextResponse.redirect(new URL('/', request.url))
 }

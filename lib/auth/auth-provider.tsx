@@ -80,22 +80,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const refreshSession = async (isFromTabReactivation = false, reason: string = 'manual') => {
+  const refreshSession = async (
+    isFromTabReactivation = false,
+    reason: string = 'manual',
+    sessionOverride?: Session | null,
+  ) => {
     if (refreshInFlightRef.current) {
       return refreshInFlightRef.current
     }
     const task = (async () => {
       try {
-        console.debug('[Auth] refreshSession start', { isFromTabReactivation, hasUser: !!user, reason })
+        const currentUser = userRef.current
+        console.debug('[Auth] refreshSession start', { isFromTabReactivation, hasUser: !!currentUser, reason })
         // If we already have a user, keep this silent (no loading spinner) even if event was SIGNED_IN again
-        if (!isFromTabReactivation && !user) {
+        if (!isFromTabReactivation && !currentUser) {
           setLoadingWithTimeout(true)
         }
-        const timeout = new Promise<null>((resolve) => setTimeout(() => {
-          console.warn('[Auth] recoverSession timeout fallback triggered')
-          resolve(null)
-        }, 6000))
-        const session = await Promise.race([recoverSession(), timeout])
+        let timeoutId: NodeJS.Timeout | null = null
+        if (sessionOverride === undefined) {
+          timeoutId = setTimeout(() => {
+            console.warn('[Auth] recoverSession slow, still waiting', { reason })
+          }, 6000)
+        }
+        const session = sessionOverride === undefined ? await recoverSession() : sessionOverride
+        if (timeoutId) {
+          clearTimeout(timeoutId)
+        }
         if (!session) {
           setUser(null)
           setIsAdmin(false)
@@ -138,7 +148,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return
         }
         if (event === 'TOKEN_REFRESHED') {
-          await refreshSession(true, 'token-refreshed')
+          await refreshSession(true, 'token-refreshed', session ?? undefined)
           return
         }
         if (event === 'SIGNED_IN') {
@@ -147,11 +157,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               console.debug('[Auth] Ignoring redundant SIGNED_IN for existing user')
               return
             }
-            await refreshSession(!!currentUser, 'signed-in')
+            await refreshSession(!!currentUser, 'signed-in', session ?? undefined)
             return
         }
         if (event === 'INITIAL_SESSION' || event === 'USER_UPDATED') {
-          await refreshSession(!!currentUser, event.toLowerCase())
+          await refreshSession(!!currentUser, event.toLowerCase(), session ?? undefined)
         }
       }
     )
@@ -189,7 +199,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // First try to recover any existing session
           const session = await recoverSession()
           if (session) {
-            await refreshSession(false) // Initial load, show loading
+            await refreshSession(false, 'initial', session) // Initial load, show loading
           } else {
             setLoadingWithTimeout(false)
           }
@@ -220,14 +230,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       setLoadingWithTimeout(true)
       
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: email.trim().toLowerCase(),
         password,
       })
       
       if (error) throw error
       
-      await refreshSession()
+      await refreshSession(false, 'password-sign-in', data?.session ?? undefined)
       // router.refresh() removed to avoid unnecessary full tree reload churn
     } catch (error: any) {
       throw error

@@ -9,9 +9,17 @@ export function SignOutButton() {
   const supabase = useSupabase()
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    router.refresh()
-    router.push('/auth/login')
+    try {
+      if (!supabase) {
+        console.error('[Auth] Supabase client not initialized')
+        return
+      }
+      await supabase.auth.signOut()
+      router.refresh()
+      router.push('/auth/login')
+    } catch (error) {
+      console.error('[Auth] Sign out failed:', error)
+    }
   }
 
   return (

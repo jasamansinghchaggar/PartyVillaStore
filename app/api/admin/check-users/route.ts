@@ -1,21 +1,20 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+import { createAdminClient } from '@/lib/database/supabase-server'
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
 import type { Database } from "@/lib/database/database.types"
 
 export async function GET() {
   try {
-    const supabase = createRouteHandlerClient<Database>({ cookies })
-    
+    const supabase = createAdminClient()
+
     // Check for existing users
     const { data, error } = await supabase.auth.admin.listUsers()
-    
+
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
-    
-    return NextResponse.json({ 
-      userCount: data?.users?.length || 0 
+
+    return NextResponse.json({
+      userCount: data?.users?.length || 0
     })
   } catch (error) {
     return NextResponse.json(

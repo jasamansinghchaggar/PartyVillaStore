@@ -1,49 +1,63 @@
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+import { createServerClient as createSsrServerClient } from '@supabase/ssr'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { createGenericClient } from './supabase'
 import type { Database } from './database.types'
 
-// For use in server components
-export const createServerClient = async () => {
-  // Server components should use createServerComponentClient
+// For use in server components and route handlers
+export const createServerClient_NextJs = async () => {
+  // Import only when called (server context)
+  const { cookies } = await import('next/headers')
+
   try {
-    // Dynamic import to avoid importing next/headers in client components
-    const { cookies } = require('next/headers')
     const cookieStore = await cookies()
-    const client = createServerComponentClient<Database>({ cookies: () => cookieStore })
-    return client;
+
+    const client = createSsrServerClient<Database>(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll()
+          },
+          setAll(cookiesToSet) {
+            try {
+              cookiesToSet.forEach(({ name, value, options }) => {
+                cookieStore.set(name, value, options)
+              })
+            } catch {
+              // cookies() is read-only in some contexts
+            }
+          },
+        },
+      }
+    )
+
+    return client
   } catch (e) {
+    console.error('[Supabase] Server client creation failed', e)
     // Fallback for non-server environments
     return createGenericClient()
   }
 }
 
-// For use in API route handlers
-export const createRouteHandler = async () => {
-  try {
-    // Dynamic import to avoid importing next/headers in client components
-    const { cookies } = require('next/headers')
-    const cookieStore = await cookies()
-    return createRouteHandlerClient<Database>({ cookies: () => cookieStore })
-  } catch (e) {
-    // Fallback for non-route handler environments
-    return createGenericClient()
-  }
-}
+// Backward compatibility - createServerClient is now async
+export const createServerClient = createServerClient_NextJs
+
+// For use in API route handlers (backwards compatible name)
+export const createRouteHandler = createServerClient_NextJs
 
 // Create server client only when needed
-export const getServerClient = () => createServerClient()
+export const getServerClient = () => createServerClient_NextJs()
 
 // For admin operations that require service role key
-export const createAdminClient = () => {
+export function createAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  
+
   if (!url || !serviceKey) {
     throw new Error('NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env variables are required for admin operations!')
   }
-  
+
   return createSupabaseClient<Database>(url, serviceKey, {
     auth: {
       autoRefreshToken: false,
